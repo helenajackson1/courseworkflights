@@ -1,0 +1,251 @@
+library("reshape2")
+library("tidyr")
+library('MASS')
+library('mlr3')
+library('skimr')
+library('mlr3learners')
+library('mlr3pipelines')
+library('mlr3tuning')
+library('paradox')
+library('ranger')
+library('mlr3viz')
+library('ggplot2')
+library('tidyverse')
+library('dplyr')
+library('magrittr')
+library("RColorBrewer")
+#
+library("viridis")
+library("datamodelr")
+
+
+setwd("C:/Users/norrs/OneDrive/Documents/UNIVERSITY/COURSEWORK/")
+df2003<- read.csv('2003.csv')
+df2004 <- read.csv('2004.csv')
+df2005 <- read.csv('2005.csv')
+
+flights <- rbind(df2003, df2004, df2005)
+
+airports <- read.csv("airports.csv")
+plane_data <- read.csv("plane-data.csv")
+sample <- read.csv("sample.10000.flights.coursework.csv")
+
+#or for the independent r sample run 
+sample <- sample_n(flights, 10000, replace=TRUE)
+
+df = sample
+
+#delay status 
+df$status[df$ArrDelay>15]<-1
+df$status[df$ArrDelay<=15]<-2
+table(df$status)
+
+# 1. When is the best time of day, day of the week, and time of year to fly to minimise delays? 
+
+#plot arrival delays
+ggplot(sample, aes(x = ArrDelay)) + 
+  geom_density() + 
+  labs(title = "Density Distribution of Arrival Delays", x = "Arrival Delay in Minutes", y = "Density")
+
+#arrival delays monthly 
+colours<-brewer.pal(n = 12, name = "Paired")
+df$date <- ISOdate(df$Year, df$Month, df$DayofMonth)
+#plot(df$date,df$ArrDelay, type='o', col=colours[8])
+
+#scatterplot
+colours <-colours[c(2,6)]
+plot(df$Month, df$ArrDelay,  xlab='Month',ylab='Arrival Delays in Minutes',main='Arrival Delays by Month',col=colours[df$status])
+
+#histogram
+hist(df$Month[df$status==1], breaks=20, xlim=c(0,12), col=colours[2], xlab='Month', main='Distribution of Delays Monthly' )
+# Add legend
+legend("topright", legend=c('Delayed'), col=colours[c(2,6)], pt.cex=2, pch=15)
+
+#September has the lowest delays 
+
+#arrival delays daily 
+hist(df$DayOfWeek[df$status==1], breaks=20, xlim=c(0,7), col=colours[2], xlab='Day Of Week', main='Distribution of Delays per Weekday' )
+# Add legend
+legend("topright", legend=c('Delayed'), col=colours[c(2,6)], pt.cex=2, pch=15)
+#Saturday has the lowest delays 
+
+#arrival delays by time of day 
+hist(df$CRSDepTime[df$status==1], breaks=25, xlim=c(0000,2400), col=colours[2], xlab='Time of Day (24 hour)', main='Average Delays by Time of Day' )
+# Add legend
+legend("topright", legend=c('Delayed'), col=colours[c(2,6)], pt.cex=2, pch=15)
+
+#delays seem to be cumulative; flying at the beginning of the day will minimise the chance of delays
+
+
+
+#2. Do older planes suffer more delays?
+
+names(df)[names(df) == 'TailNum'] <- 'tailnum'
+head(plane_data)''
+#merge sample data with plane data
+vec_detect_complete(plane_data)
+df%>% drop_na()
+df('issue_date')
+df = merge(x = df, y = plane_data, by = "tailnum", all.x = TRUE)
+summary(df)
+
+#remove duplicated columms
+duplicated(df)
+df <- df[!duplicated(as.list(df))]
+
+df$year <- as.numeric(df$year.y)
+hist(df$year[df$status==1], breaks=20,xlim=c(1994,2007), col=colours[2], xlab='Day Of Week', main='Distribution of Delays per Weekday' )
+# Add legend
+legend("topright", legend=c('Delayed'), col=colours[c(2,6)], pt.cex=2, pch=15)
+
+#boxplot of manufacture year vs Arrival Delays
+boxplot(ArrDelay ~ year, data=df)
+
+#higher arrival delays in later years shown so cannot conclude that older planes suffer more delays 
+
+#also consider NASDelays - highest causer of delays. Outside carrier control aka. not linked to age of plane. 
+
+
+
+#3. How does the number of people flying between different locations change over time?
+
+library(data.table)
+library(ggplot2)
+library(ggforce)
+library(repr)
+require(lubridate)
+options(repr.plot.width=15, repr.plot.height=15)
+
+USA = map_data('state')
+
+#read csv files of top departure / origin airports we have already created in python
+top_destinations <- read.csv("top_destinations.csv")
+top_departures <- read.csv("top_origins.csv")
+head(top_destinations)
+head(top_departures)
+
+#alternatively in r: 
+
+origins <- df %>% 
+  group_by(iata) %>% 
+  summarise(n = n())
+origins
+
+destinations <- df %>%
+  group_by(Dest) %>%
+  summarise(n = n())
+destinations
+
+#plot the total number of flights over time
+daily <- df %>% 
+  group_by(date) %>% 
+  summarise(n = n())
+daily
+ggplot(daily, aes(date, n)) + 
+  geom_line() + 
+  stat_smooth() +
+  xlim(ISOdate(2003,01,01), ISOdate(2005,12,31)) +
+  ylim(0, 18) + 
+  labs(title = "Number of Flights over time", x = "date", y = "Flight Frequency")
+
+#summarise the monthly flights to and from atlanta
+ATL <- filter(sample, iata == 'ATL')
+ATLdest <- ATL%>%
+  group_by(date) %>% 
+  summarise(n = n())
+ATLdest
+
+#plot volume of flights from ATL monthly 
+ggplot(ATLdest, aes(date, n)) + 
+  geom_line() + 
+  stat_smooth() +
+  xlim(ISOdate(2003,01,01), ISOdate(2005,12,31)) +
+  ylim(0, 100) + 
+  labs(title = "Number of Flights from Atlanta by month", x = "Month", y = "Flight Frequency")
+
+#flights into ATL
+intoATL <- filter(sample, Dest == 'ATL')
+intoATL <- intoATL%>%
+  group_by(Month) %>% 
+  summarise(n = n())
+intoATL
+
+#plot volume of flights from ATL monthly 
+ggplot(intoATL, aes(Month, n)) + 
+  geom_line() + 
+  stat_smooth() +
+  xlim(ISOdate(2003,01,01), ISOdate(2005,12,31)) +
+  ylim(0, 100) + 
+  labs(title = "Number of Flights into Atlanta by month", x = "Month", y = "Flight Frequency")
+
+#summarise the monthly flights to and from Chicago
+ORD <-filter(sample, iata == 'ORD')
+ORDdest <- ORD%>%
+  group_by(date) %>% 
+  summarise(n = n())
+ORDdest
+
+#plot volume of flights from ORD monthly 
+ggplot(ORDdest, aes(date, n)) + 
+  geom_line() + 
+  stat_smooth() +
+  xlim(ISOdate(2003,01,01), ISOdate(2005,12,31)) +
+  ylim(0, 100) + 
+  labs(title = "Number of Flights from Chicago by month", x = "Month", y = "Flight Frequency")
+
+#flights into ORD
+intoORD <-filter(sample, Dest == 'ORD')
+intoORD <- intoORD%>%
+  group_by(Month) %>% 
+  summarise(n = n())
+intoORD
+
+#plot volume of flights from ORD monthly 
+ggplot(intoORD, aes(Month, n)) + 
+  geom_line() + 
+  stat_smooth() +
+  xlim(ISOdate(2003,01,01), ISOdate(2005,12,31)) +
+  ylim(0, 100) + 
+  labs(title = "Number of Flights into Chicago by month", x = "Month", y = "Flight Frequency")
+
+#repeat for DFW 
+DFW <- filter(sample, iata == 'DFW')
+
+#plot all three in departures by Month
+tripledeparture <- filter(sample, iata == 'ATL' | iata == 'DFW'| iata == 'ORD')
+tripledeparture <- tripledeparture%>%
+  group_by(date) %>% 
+  summarise(n = n())
+ggplot(tripledeparture, aes(date, n)) + 
+  geom_line() + 
+  stat_smooth() +
+  xlim(ISOdate(2003,01,01), ISOdate(2005,12,31)) +
+  ylim(0, 100) + 
+  labs(title = "Number of Flights from Atlanta, Chicago and Dallas by month", x = "Month", y = "Flight Frequency")
+
+##plot arrivals by Month for all three
+triplearrivals <- filter(sample, Dest == 'ATL' | Dest == 'DFW'| Dest == 'ORD')
+triplearrivals <- triplearrivals %>%
+  group_by(date) %>% 
+  summarise(n = n())
+ggplot(triplearrivals, aes(date, n)) + 
+  geom_line() + 
+  stat_smooth() +
+  xlim(ISOdate(2003,01,01), ISOdate(2005,12,31)) +
+  ylim(0, 100) + 
+  labs(title = "Number of Flights into Atlanta, Chicago and Dallas by month", x = "Month", y = "Flight Frequency")
+
+
+
+
+# 4 Can you detect cascading delays? 
+
+#heatmap
+late <- filter(sample, LateAircraftDelay >= 0)
+summary(late)
+data <- as.matrix(late)
+colblues <- colorRampPalette(brewer.pal(8, 'Blues'))(25)
+heatmap(data, Colv = NA, Rowv = NA, scale='column', xlab='', main='heatmap',col=colblues)
+
+# 5 Prediciton Models 
+# ran out of time. refer to python. 
